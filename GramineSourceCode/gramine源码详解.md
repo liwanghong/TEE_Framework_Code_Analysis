@@ -1,4 +1,4 @@
-# loader详解
+# gramine源码详解
 
 ## gramine-sgx 使用简介
 
@@ -105,6 +105,7 @@ sgx.allowed_files = [
 - loader.entrypoint 指定的是libos的路径，目前只有一个libos, 也就是libsysdb.so
 - libos.entrypoint 该配置文件在sgx enclave执行的第一个用户可执行文件。
 
+## loader载入libpal.so到Enclave
 
 loader是gramine整个系统在linux非安全区的入口程序，loader对应的源码文件可以参考gramine/pal/src/host/linux-sgx/meson.build
 
@@ -697,6 +698,8 @@ void handle_ecall(long ecall_index, void* ecall_args, void* exit_target, void* e
 
 handle_ecall 后的调用顺序为 handle_ecall->pal_linux_main->pal_main, 在pal_linux_main 会在Enclave内部进行相关的检查和配置，详情请参考代码。
 
+## 进入Enclave后加载LibOS流程
+
 pal_main的核心流程为加载libos（也就是libsysdb.so）到enclave，并执行libos。 代码如下所示:
 ```
 noreturn void pal_main(uint64_t instance_id,       /* current instance id */
@@ -748,6 +751,8 @@ OUTPUT_FORMAT("elf64-x86-64", "elf64-x86-64", "elf64-x86-64")
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(libos_start)
 ```
+
+## LibOS 启动应用程序
 
 libos_start之后的调用顺序为 libos_start->libos_init->execute_elf_object
 
@@ -826,9 +831,11 @@ execute_elf_object 和 linux kernel SYS_execve syscall interpreter信息，并�
 
 interpreter即为libdl.so。interpreter会检查待启动程序的依赖是否满足，如果满足则会启动程序。至此gramine已经将原有的可执行文件在未改动的情况下迁移到sgx环境内运行。
 
-libc对syscall的处理
+## 应用程序syscall工作原理
 
 libc的很多功能是通过syscall来实现的，例如打开文件，分配内存等等，而enclave内部无法直接调用syscall，所以要想程序以无迁移的形式启动，必须对libc原有的syscall进行某种处理。
+
+### 替换syscall调用
 
 参考subprojects/packagefiles/glibc-2.37/gramine-syscall.patch, 如下所示，Gramine将libc原有的syscall 替换成自定义宏GRAMINE_SYSCALL
 
@@ -878,6 +885,8 @@ __asm__(
 );
 ```
 如上所示，GRAMINE_SYSCALL_OFFSET在tcb中的偏移为24，为什么偏移为24?
+
+### GRAMINE_SYSCALL_OFFSET 偏移计算原理
 
 在loader初始化encalve信息时，会调用pal_thread_init初始化线程的TCB信息，相关的几个结构信息如下
 ```
@@ -944,7 +953,7 @@ int pal_thread_init(void* tcbptr) {
 
 如上调用pal_set_tcb 设置tcb信息，对应的结构为 PAL_TCB。从上述结构，PAL_TCB包含8Bytes self指针信息，8Bytes stack_protector_canary信息，后续则为libos_tcb结构信息。libos_tcb 前8个Bytes为self指针，接着为libos_syscall_entry，也就是上述偏移为24的GRAMINE_SYSCALL_OFFSET。
 
-
+### Enclave内模拟Syscall调用流程
 libos_syscall_entry详细实现见libos/src/arch/x86_64/syscallas.S，该函数在保存当前线程的上下文信息后，调用libos_emulate_syscall函数。
 
 函数实现如下
@@ -1234,6 +1243,8 @@ static int create(struct libos_handle* handle) {
 该函数通过调用PalSocketCreate来创建Socket，详细流程图如下所示：
 ![PalSocketCreate Flow](./images/socket_ocall.png)
 
+
+### OCALL调用流程
 
 sgx_ocall实现详见pal/src/host/linux-sgx/enclave_entry.S,  调用大致流程为
 1. 保存当前栈信息

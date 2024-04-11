@@ -26,7 +26,8 @@ Gramine SGX架构如下图所示：
 
  - Linux系统如何启动一个新进程
  - loader如何载入 libpal.so 到 Enclave
- - libpal.so 如何启动应用程序
+ - libpal.so 如何载入libOS(libsysdb.so)
+ - libOS 启动应用程序
  - 应用程序syscall工作原理
  - 如何启动一个新线程
  - 中断处理
